@@ -85,39 +85,42 @@ namespace Azure.Functions.Cli.Actions.LocalActions
                 return;
             }
 
-            if (CommandChecker.CommandExists("dotnet"))
+            if (!string.IsNullOrEmpty(ConfigPath) && !FileSystemHelpers.DirectoryExists(ConfigPath))
             {
-                if (!string.IsNullOrEmpty(ConfigPath) && !FileSystemHelpers.DirectoryExists(ConfigPath))
-                {
-                    throw new CliArgumentsException("Invalid config path, please verify directory exists");
-                }
+                throw new CliArgumentsException("Invalid config path, please verify directory exists");
+            }
 
-                var extensionsProj = await ExtensionsHelper.EnsureExtensionsProjectExistsAsync(_secretsManager, Csx, ConfigPath);
+            var extensionsProj = await ExtensionsHelper.EnsureExtensionsProjectExistsAsync(_secretsManager, Csx, ConfigPath);
+            var syncNeeded = false;
 
-                if (string.IsNullOrEmpty(Package) && string.IsNullOrEmpty(Version))
+            if (string.IsNullOrEmpty(Package) && string.IsNullOrEmpty(Version))
+            {
+                var project = ProjectHelpers.GetProject(extensionsProj);
+                foreach (var extensionPackage in ExtensionsHelper.GetExtensionPackages())
                 {
-                    var project = ProjectHelpers.GetProject(extensionsProj);
-                    foreach (var extensionPackage in ExtensionsHelper.GetExtensionPackages())
+                    // Only add / update package referece if it does not exist or forced update is enabled
+                    if (!ProjectHelpers.PackageReferenceExists(project, extensionPackage.Name) || Force)
                     {
-                        // Only add / update package referece if it does not exist or forced update is enabled
-                        if (!ProjectHelpers.PackageReferenceExists(project, extensionPackage.Name) || Force)
-                        {
-                            await AddPackage(extensionsProj, extensionPackage.Name, extensionPackage.Version);
-                        }
+                        await AddPackage(extensionsProj, extensionPackage.Name, extensionPackage.Version);
+                        syncNeeded = true;
                     }
                 }
-                else if (!string.IsNullOrEmpty(Package) && !string.IsNullOrEmpty(Version))
-                {
-                    await AddPackage(extensionsProj, Package, Version);
-                }
-                else
-                {
-                    throw new CliArgumentsException("Must specify extension package name and version",
-                    new CliArgument { Name = nameof(Package), Description = "Extension package name" },
-                    new CliArgument { Name = nameof(Version), Description = "Extension package version" }
-                    );
-                }
+            }
+            else if (!string.IsNullOrEmpty(Package) && !string.IsNullOrEmpty(Version))
+            {
+                await AddPackage(extensionsProj, Package, Version);
+                syncNeeded = true;
+            }
+            else
+            {
+                throw new CliArgumentsException("Must specify extension package name and version",
+                new CliArgument { Name = nameof(Package), Description = "Extension package name" },
+                new CliArgument { Name = nameof(Version), Description = "Extension package version" }
+                );
+            }
 
+            if (syncNeeded)
+            {
                 var syncAction = new SyncExtensionsAction(_secretsManager, false)
                 {
                     OutputPath = OutputPath,
@@ -126,22 +129,25 @@ namespace Azure.Functions.Cli.Actions.LocalActions
 
                 await syncAction.RunAsync();
             }
-            else
-            {
-                ColoredConsole.Error.WriteLine(ErrorColor(Constants.Errors.ExtensionsNeedDotnet));
-            }
         }
 
         private async Task AddPackage(string extensionsProj, string pacakgeName, string version)
         {
-            var args = $"add \"{extensionsProj}\" package {pacakgeName} --version {version}";
-            if (!string.IsNullOrEmpty(Source))
+            if (CommandChecker.CommandExists("dotnet"))
             {
-                args += $" --source {Source}";
-            }
+                var args = $"add \"{extensionsProj}\" package {pacakgeName} --version {version}";
+                if (!string.IsNullOrEmpty(Source))
+                {
+                    args += $" --source {Source}";
+                }
 
-            var addPackage = new Executable("dotnet", args);
-            await addPackage.RunAsync(output => ColoredConsole.WriteLine(output), error => ColoredConsole.WriteLine(ErrorColor(error)));
+                var addPackage = new Executable("dotnet", args);
+                await addPackage.RunAsync(output => ColoredConsole.WriteLine(output), error => ColoredConsole.WriteLine(ErrorColor(error)));
+            }
+            else
+            {
+                ColoredConsole.Error.WriteLine(ErrorColor(Constants.Errors.ExtensionsNeedDotnet));
+            }
         }
     }
 }

@@ -63,7 +63,12 @@ namespace Azure.Functions.Cli.Helpers
                 }
             }
 
-            packages.Add("ExtensionsMetadataGeneratorPackage", Constants.ExtensionsMetadataGeneratorPackage);
+            // We only need extensionsMetadatGeneratorPackage, if there is a trigger type that requires an extension
+            // So, if we didn't find any extension packages, we don't need to add this.
+            if (packages.Count != 0)
+            {
+                packages.Add("ExtensionsMetadataGeneratorPackage", Constants.ExtensionsMetadataGeneratorPackage);
+            }
 
             return packages.Values;
         }
