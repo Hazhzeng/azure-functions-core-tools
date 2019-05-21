@@ -40,6 +40,7 @@ namespace Azure.Functions.Cli.Actions.AzureActions
         public bool Force { get; set; }
         public bool Csx { get; set; }
         public bool BuildNativeDeps { get; set; }
+        public bool ServerSideBuild { get; set; }
         public string AdditionalPackages { get; set; } = string.Empty;
         public bool NoBuild { get; set; }
         public string DotnetCliParameters { get; set; }
@@ -82,6 +83,11 @@ namespace Azure.Functions.Cli.Actions.AzureActions
                 .SetDefault(false)
                 .WithDescription("Skips generating .wheels folder when publishing python function apps.")
                 .Callback(f => BuildNativeDeps = f);
+            Parser
+                .Setup<bool>("server-side-build")
+                .SetDefault(false)
+                .WithDescription("Enable server side build for Linux Consumption python function apps.")
+                .Callback(f => ServerSideBuild = f);
             Parser
                 .Setup<bool>("no-bundler")
                 .WithDescription("[Deprecated] Skips generating a bundle when publishing python function apps with build-native-deps.")
@@ -281,6 +287,17 @@ namespace Azure.Functions.Cli.Actions.AzureActions
                 RunFromPackageDeploy = false;
             }
 
+            // For consumption linux apps, we allow user to define --server-side-build flag
+            if (functionApp.IsLinux && functionApp.IsDynamic && ServerSideBuild)
+            {
+                ColoredConsole.WriteLine("Disable WEBSITE_RUN_FROM_PACKAGE when --server-side-build is enabled.");
+                RunFromPackageDeploy = false;
+            }
+            if (!(functionApp.IsLinux && functionApp.IsDynamic) && ServerSideBuild)
+            {
+                throw new CliException("--server-side-build flag is only supported for Linux Consumption");
+            }
+
             var workerRuntime = _secretsManager.GetSecrets().FirstOrDefault(s => s.Key.Equals(Constants.FunctionsWorkerRuntime, StringComparison.OrdinalIgnoreCase)).Value;
             var workerRuntimeEnum = string.IsNullOrEmpty(workerRuntime) ? WorkerRuntime.None : WorkerRuntimeLanguageHelper.NormalizeWorkerRuntime(workerRuntime);
             if (workerRuntimeEnum == WorkerRuntime.python && !functionApp.IsLinux)
@@ -288,10 +305,10 @@ namespace Azure.Functions.Cli.Actions.AzureActions
                 throw new CliException("Publishing Python functions is only supported for Linux FunctionApps");
             }
 
-            Func<Task<Stream>> zipStreamFactory = () => ZipHelper.GetAppZipFile(workerRuntimeEnum, functionAppRoot, BuildNativeDeps, NoBuild, ignoreParser, AdditionalPackages, ignoreDotNetCheck: true);
+            Func<Task<Stream>> zipStreamFactory = () => ZipHelper.GetAppZipFile(workerRuntimeEnum, functionAppRoot, BuildNativeDeps, ServerSideBuild, NoBuild, ignoreParser, AdditionalPackages, ignoreDotNetCheck: true);
 
             // If Consumption Linux or Elastic Premium Linux
-            if (functionApp.IsLinux && (functionApp.IsDynamic || functionApp.IsElasticPremium))
+            if (functionApp.IsLinux && functionApp.IsElasticPremium)
             {
                 await PublishRunFromPackage(functionApp, await zipStreamFactory());
             }
@@ -300,7 +317,7 @@ namespace Azure.Functions.Cli.Actions.AzureActions
             {
                 await PublishRunFromPackageLocal(functionApp, zipStreamFactory);
             }
-            // If Dedicated Linux or "--no-zip"
+            // If Linux Dedicated or Linux Consumption or "--no-zip"
             else
             {
                 await PublishZipDeploy(functionApp, zipStreamFactory);
@@ -316,7 +333,7 @@ namespace Azure.Functions.Cli.Actions.AzureActions
             }
 
             // Syncing triggers is not required when using zipdeploy api
-            if ((functionApp.IsLinux && (functionApp.IsDynamic || functionApp.IsElasticPremium))
+            if ((functionApp.IsLinux && functionApp.IsElasticPremium)
                 || RunFromPackageDeploy)
             {
                 await Task.Delay(TimeSpan.FromSeconds(5));
