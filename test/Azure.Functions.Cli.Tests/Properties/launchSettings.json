@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Azure.Functions.Cli.Tests": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "FUNC_PATH": "C:\\Users\\hazeng\\AppData\\Local\\Temp\\8d6da48c0a0dd74"
+      }
+    }
+  }
+}
