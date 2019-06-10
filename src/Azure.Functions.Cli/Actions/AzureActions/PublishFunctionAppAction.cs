@@ -291,7 +291,7 @@ namespace Azure.Functions.Cli.Actions.AzureActions
             // For consumption linux apps, we allow user to define --server-side-build flag
             if (functionApp.IsLinux && functionApp.IsDynamic && ServerSideBuild)
             {
-                ColoredConsole.WriteLine("Disable WEBSITE_RUN_FROM_PACKAGE when --server-side-build is enabled.");
+                ColoredConsole.WriteLine("Disable WEBSITE_RUN_FROM_PACKAGE when --server-side-build is set.");
                 RunFromPackageDeploy = false;
             }
             if (!(functionApp.IsLinux && functionApp.IsDynamic) && ServerSideBuild)
