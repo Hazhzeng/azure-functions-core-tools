@@ -25,7 +25,7 @@ namespace Azure.Functions.Cli.Helpers
                 ColoredConsole.WriteLine(Yellow("Skipping build event for functions project (--no-build)."));
             } else if (serverSideBuild)
             {
-                ColoredConsole.WriteLine(Yellow("Skipping build event for functions project (--server-side-build)."));
+                ColoredConsole.WriteLine(Yellow("Enable server side build for project (--server-side-build)."));
             }
 
             if (workerRuntime == WorkerRuntime.python && !noBuild && !serverSideBuild)

@@ -18,6 +18,7 @@ using Azure.Functions.Cli.Helpers;
 using Azure.Functions.Cli.Interfaces;
 using Colors.Net;
 using Fclp;
+using System.Net;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
 using Newtonsoft.Json;
@@ -289,6 +290,10 @@ namespace Azure.Functions.Cli.Actions.AzureActions
             }
 
             // For consumption linux apps, we allow user to define --server-side-build flag
+            if (functionApp.IsLinux && functionApp.IsDynamic && ServerSideBuild && BuildNativeDeps)
+            {
+                throw new CliException("Cannot perform --build-native-deps with --server-side-build");
+            }
             if (functionApp.IsLinux && functionApp.IsDynamic && ServerSideBuild)
             {
                 ColoredConsole.WriteLine("Disable WEBSITE_RUN_FROM_PACKAGE when --server-side-build is set.");
@@ -313,9 +318,18 @@ namespace Azure.Functions.Cli.Actions.AzureActions
             if (functionApp.IsLinux && functionApp.IsDynamic)
             {
                 // Consumption Linux, try squashfs as a package format.
-                if (workerRuntimeEnum == WorkerRuntime.python && !NoBuild && BuildNativeDeps)
+                if (workerRuntimeEnum == WorkerRuntime.python && !NoBuild && (BuildNativeDeps || ServerSideBuild))
                 {
-                    await PublishRunFromPackage(functionApp, await PythonHelpers.ZipToSquashfsStream(await zipStreamFactory()), $"{fileNameNoExtension}.squashfs");
+                    if (BuildNativeDeps)
+                    {
+                        await PublishRunFromPackage(functionApp, await PythonHelpers.ZipToSquashfsStream(await zipStreamFactory()), $"{fileNameNoExtension}.squashfs");
+                    }
+                    
+                    if (ServerSideBuild)
+                    {
+                        shouldSyncTriggers = false;
+                        await PerformServerSideBuild(functionApp, zipStreamFactory);
+                    }
                 }
                 else
                 {
@@ -483,8 +497,6 @@ namespace Azure.Functions.Cli.Actions.AzureActions
                 using (var client = GetRemoteZipClient(new Uri($"https://{functionApp.ScmUri}"), handler))
                 using (var request = new HttpRequestMessage(HttpMethod.Post, new Uri("api/zipdeploy", UriKind.Relative)))
                 {
-                    request.Headers.IfMatch.Add(EntityTagHeaderValue.Any);
-
                     ColoredConsole.WriteLine("Creating archive for current directory...");
 
                     (var content, var length) = CreateStreamContentZip(await zipFileFactory());
@@ -502,6 +514,9 @@ namespace Azure.Functions.Cli.Actions.AzureActions
                         var responseContent = await response.Content.ReadAsStringAsync();
                         var errorMessage = $"Error uploading archive ({response.StatusCode}).";
 
+                        // TODO: hazeng, remove this later on
+                        ColoredConsole.WriteLine("[ERROR]: " + errorMessage);
+
                         if (!string.IsNullOrEmpty(responseContent))
                         {
                             errorMessage += $"{Environment.NewLine}Server Response: {responseContent}";
@@ -511,6 +526,69 @@ namespace Azure.Functions.Cli.Actions.AzureActions
                     }
 
                     ColoredConsole.WriteLine("Upload completed successfully.");
+                }
+            }, 2);
+        }
+
+        public async Task PerformServerSideBuild(Site functionApp, Func<Task<Stream>> zipFileFactory)
+        {
+            await RetryHelper.Retry(async () =>
+            {
+                using (var handler = new ProgressMessageHandler(new HttpClientHandler()))
+                using (var client = GetRemoteZipClient(new Uri($"https://{functionApp.ScmUri}"), handler))
+                using (var request = new HttpRequestMessage(HttpMethod.Post, new Uri(
+                    $"api/zipdeploy?isAsync=true&author={Environment.MachineName}", UriKind.Relative)))
+                {
+                    ColoredConsole.WriteLine("Creating archive for current directory...");
+
+                    request.Headers.IfMatch.Add(EntityTagHeaderValue.Any);
+
+                    // Attach x-ms-site-restricted-token for Linux Dynamic Server Side Build
+                    string restrictedToken = await KuduLiteDeploymentHelpers.GenerateRestrictedToken(client, functionApp);
+                    request.Headers.Add("x-ms-site-restricted-token", restrictedToken);
+
+                    (var content, var length) = CreateStreamContentZip(await zipFileFactory());
+                    request.Content = content;
+
+                    HttpResponseMessage response = null;
+                    using (var pb = new SimpleProgressBar($"Uploading {Utilities.BytesToHumanReadable(length)}"))
+                    {
+                        handler.HttpSendProgress += (s, e) => pb.Report(e.ProgressPercentage);
+                        response = await client.SendAsync(request);
+                    }
+
+                    // Handle deployment response
+                    if (response == null || !response.IsSuccessStatusCode)
+                    {
+                        var responseContent = await response.Content.ReadAsStringAsync();
+                        var errorMessage = $"Error uploading archive ({response.StatusCode}).";
+
+                        if (!string.IsNullOrEmpty(responseContent))
+                        {
+                            errorMessage += $"{Environment.NewLine}Server Response: {responseContent}";
+                        }
+
+                        ColoredConsole.WriteLine(Red(errorMessage));
+
+                        switch (response.StatusCode)
+                        {
+                            case HttpStatusCode.Conflict:
+                                return;
+                            default:
+                                throw new CliException(errorMessage);
+                        }
+                    }
+
+                    // Streaming deployment status for Linux Dynamic Server Side Build
+                    DeployStatus status = await KuduLiteDeploymentHelpers.WaitForServerSideBuild(client, functionApp, restrictedToken);
+                    if (status == DeployStatus.Success)
+                    {
+                        ColoredConsole.WriteLine(Green("Server side build succeeded!"));
+                    }
+                    else if (status == DeployStatus.Failed)
+                    {
+                        ColoredConsole.WriteLine(Red("Server side build failed!"));
+                    }
                 }
             }, 2);
         }
