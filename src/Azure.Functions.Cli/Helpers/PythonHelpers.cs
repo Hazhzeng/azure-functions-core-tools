@@ -85,7 +85,7 @@ namespace Azure.Functions.Cli.Helpers
                 return await GetVersion(pythonDefaultExecutablePath);
             }
 
-            const string infoVersionSelectMessage = "We select Python interpreter '{0}' with version {1} for your project.";
+            const string infoVersionSelectMessage = "Found Python version {0} ({1}).";
             const string warningMessage = "Python 3.6.x or 3.7.x is recommended, and used in Azure Functions. You are using Python version {0}.";
             const string errorIfNotExactMessage = "Python 3.6.x or 3.7.x is required, and used in Azure Functions. You are using Python version {0}. "
                 + "Please install Python 3.6 or 3.7, and use a virtual environment to switch to Python 3.6 or 3.7.";
@@ -110,7 +110,7 @@ namespace Azure.Functions.Cli.Helpers
             if (python36_37worker != null)
             {
                 SetWorkerPathIfNeeded(setWorkerExecutable, python36_37worker.ExecutablePath);
-                ColoredConsole.WriteLine(AdditionalInfoColor(string.Format(infoVersionSelectMessage, python36_37worker.ExecutablePath, python36_37worker.Version)));
+                ColoredConsole.WriteLine(AdditionalInfoColor(string.Format(infoVersionSelectMessage, python36_37worker.Version, python36_37worker.ExecutablePath)));
                 return python36_37worker;
             }
 
@@ -167,7 +167,18 @@ namespace Azure.Functions.Cli.Helpers
             return null;
         }
 
-        public static async Task<string> VerifyVersion(string pythonExe = "python")
+        public static void SetWorkerRuntimeVersionPython(WorkerLanguageVersionInfo version)
+        {
+            if (version == null)
+            {
+                throw new ArgumentNullException(nameof(version), "Version must not be null.");
+            }
+
+            var versionStr = $"{version.Major}.{version.Minor}";
+            Environment.SetEnvironmentVariable(Constants.FunctionsWorkerRuntimeVersion, versionStr, EnvironmentVariableTarget.Process);
+        }
+
+        private static async Task<string> VerifyVersion(string pythonExe = "python")
         {
             var exe = new Executable(pythonExe, "--version");
             var sb = new StringBuilder();
