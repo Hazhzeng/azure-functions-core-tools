@@ -20,15 +20,6 @@ namespace Build
                 .Then(FilterPowershellRuntimes)
                 .Then(AddDistLib)
                 .Then(AddTemplatesNupkgs)
-                .Then(GenerateZipToSign, skip: !args.Contains("--sign"))
-                .Then(UploadZipToSign, skip: !args.Contains("--sign"))
-                .Then(EnqueueSignMessage, skip: !args.Contains("--sign"))
-                .Then(WaitForSigning, skip: !args.Contains("--sign"))
-                .Then(ReplaceSignedZipAndCleanup, skip: !args.Contains("--sign"))
-                .Then(TestSignedArtifacts, skip: !args.Contains("--sign"))
-                .Then(Test)
-                .Then(Zip)
-                .Then(UploadToStorage)
                 .Run();
         }
     }
